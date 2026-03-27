@@ -16,14 +16,17 @@ Requirements: Python 3.6+ (stdlib only, no pip installs needed)
 """
 
 import argparse
-import glob
 import math
 import os
-import shutil
 import sys
-import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
-from datetime import datetime
+
+from lpd_common import (
+    parse_lpd, build_graph, topological_sort,
+    validate_refs as validate,
+    make_backup, find_latest_backup, restore_backup, write_lpd,
+    ITERATOR_TYPES,
+)
 
 # ── Layout constants (overridable via CLI) ────────────────────────────────────
 COL_WIDTH  = 160   # pixels between columns  (horizontal spacing)
@@ -32,80 +35,6 @@ BAND_GAP   = 80    # fixed extra gap between bands (vertical)
 START_X    = 40    # left margin
 START_Y    = 80    # top margin (main flow anchored here)
 MAX_COLS   = 0     # 0 = auto-detect (targets ~3 bands); override with --max-cols or --bands
-
-# Node types that are iterators and MUST have a paired ItEnd
-ITERATOR_TYPES = {
-    'ITERFR', 'QUERY', 'LM', 'LOOP', 'DATAEX',
-    'LDAPQ', 'RMQR', 'IONIN', 'SQLQR', 'FORMTXN',
-}
-
-
-# ── Parsing ───────────────────────────────────────────────────────────────────
-
-def parse_lpd(filepath):
-    """Return (tree, root, activities_dict, edges_list)."""
-    ET.register_namespace('', '')  # suppress ns0 prefix noise
-    tree = ET.parse(filepath)
-    root = tree.getroot()
-
-    activities = {}
-    for act in root.findall('.//activity'):
-        aid = act.get('id')
-        if aid:
-            activities[aid] = act
-
-    edges = []
-    for edge in root.findall('.//edge'):
-        edges.append({
-            'id':   edge.get('id'),
-            'from': edge.get('from'),
-            'to':   edge.get('to'),
-            'type': edge.get('edgeType', 'NORMAL'),
-        })
-
-    return tree, root, activities, edges
-
-
-# ── Graph construction ────────────────────────────────────────────────────────
-
-def build_graph(activities, edges):
-    """Return (out_edges, in_edges) as dicts of node_id → list of (neighbor, edge_type)."""
-    out_edges = defaultdict(list)
-    in_edges  = defaultdict(list)
-    all_ids   = set(activities.keys())
-
-    for e in edges:
-        src, dst = e['from'], e['to']
-        if src in all_ids and dst in all_ids:
-            out_edges[src].append((dst, e['type']))
-            in_edges[dst].append((src, e['type']))
-
-    return dict(out_edges), dict(in_edges)
-
-
-# ── Topological sort (Kahn's algorithm) ──────────────────────────────────────
-
-def topological_sort(node_ids, out_edges, in_edges):
-    """Return nodes in topological order. Handles disconnected nodes."""
-    in_degree = {n: 0 for n in node_ids}
-    for n in node_ids:
-        for (dst, _) in out_edges.get(n, []):
-            in_degree[dst] = in_degree.get(dst, 0) + 1
-
-    queue = deque(n for n in node_ids if in_degree[n] == 0)
-    order = []
-    while queue:
-        n = queue.popleft()
-        order.append(n)
-        for (dst, _) in out_edges.get(n, []):
-            in_degree[dst] -= 1
-            if in_degree[dst] == 0:
-                queue.append(dst)
-
-    # Any remaining nodes (cycles — shouldn't exist in valid LPD) appended last
-    remaining = set(node_ids) - set(order)
-    order.extend(sorted(remaining))
-    return order
 
 
 # ── Branch analysis ───────────────────────────────────────────────────────────
@@ -323,80 +252,6 @@ def reduce_crossings(cols, rows, out_edges, in_edges, iterations=4):
                 rows[n] = r
 
     return rows
-
-
-# ── Validation (edge reference integrity) ────────────────────────────────────
-
-def validate(root, activity_ids):
-    """Return list of error strings (empty = clean)."""
-    errors = []
-    edges  = root.findall('.//edge')
-
-    for edge in edges:
-        f, t = edge.get('from'), edge.get('to')
-        if f not in activity_ids:
-            errors.append(f"Edge {edge.get('id')}: from='{f}' references missing node")
-        if t not in activity_ids:
-            errors.append(f"Edge {edge.get('id')}: to='{t}' references missing node")
-
-    for act in root.findall('.//activity'):
-        goto_el = act.find('.//OnActivityError/goto')
-        act_el  = act.find('.//OnActivityError/activity')
-        if goto_el is not None and goto_el.text == 'true':
-            if act_el is not None and act_el.text and act_el.text not in activity_ids:
-                errors.append(
-                    f"{act.get('id')}: OnActivityError goto='{act_el.text}' references missing node"
-                )
-
-    return errors
-
-
-# ── Backup / Restore ──────────────────────────────────────────────────────────
-
-def make_backup(filepath):
-    """Copy file to <name>_layout_backup_YYYYMMDD_HHMMSS.lpd. Returns backup path."""
-    base, ext = os.path.splitext(filepath)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    backup_path = f"{base}_layout_backup_{timestamp}{ext}"
-    shutil.copy2(filepath, backup_path)
-    return backup_path
-
-
-def find_latest_backup(filepath):
-    """Return path to the most recent layout backup for this file, or None."""
-    base, ext = os.path.splitext(filepath)
-    pattern = f"{base}_layout_backup_*{ext}"
-    candidates = sorted(glob.glob(pattern))
-    return candidates[-1] if candidates else None
-
-
-def restore_backup(filepath):
-    backup = find_latest_backup(filepath)
-    if not backup:
-        print(f"No backup found for {filepath}")
-        return False
-    shutil.copy2(backup, filepath)
-    print(f"Restored from: {backup}")
-    return True
-
-
-# ── XML write helper ──────────────────────────────────────────────────────────
-
-def write_lpd(tree, filepath):
-    """
-    Write back as single-line XML (IDP expects this format).
-    Preserve the XML declaration and encoding.
-    """
-    # ElementTree.write handles the file; use xml_declaration=True
-    tree.write(filepath, encoding='UTF-8', xml_declaration=True)
-
-    # ElementTree writes <?xml version='1.0' encoding='UTF-8'?> — normalise to double quotes
-    with open(filepath, 'r', encoding='utf-8') as f:
-        content = f.read()
-    content = content.replace("<?xml version='1.0' encoding='UTF-8'?>",
-                               '<?xml version="1.0" encoding="UTF-8"?>', 1)
-    with open(filepath, 'w', encoding='utf-8', newline='') as f:
-        f.write(content)
 
 
 # ── Band (wrap) helpers ───────────────────────────────────────────────────────
