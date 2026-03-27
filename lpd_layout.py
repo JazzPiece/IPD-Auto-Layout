@@ -208,48 +208,125 @@ def align_branch_returns(cols, rows, in_edges):
 
 # ── Crossing reduction (barycenter heuristic) ────────────────────────────────
 
-def reduce_crossings(cols, rows, out_edges, in_edges, iterations=4):
+def reduce_crossings(cols, rows, out_edges, in_edges, iterations=20):
     """
-    Barycenter heuristic crossing reduction (Sugiyama framework, layer 3).
+    Barycenter heuristic crossing reduction (Sugiyama framework, phase 3).
 
-    For each column, nodes are reordered by the mean row-position of their
-    neighbors (predecessors + successors). Alternates forward and backward
-    passes for stability. The same set of row values stays in use for each
-    column — nodes are just swapped, never moved to new rows.
+    Runs alternating forward/backward passes over columns. Forward passes use
+    predecessor rows as the barycenter reference; backward passes use successor
+    rows. This directional separation is the key improvement over using both
+    sides simultaneously — it mirrors the two-sided sweep used by Graphviz and
+    ELK (which run 15-20 passes; 4 was too few for complex branchy processes).
 
-    Enable with --sort-rows. Noticeable improvement on processes with 3+
-    parallel branch rows where edges would otherwise cross each other.
+    The same set of row values stays in use for each column — nodes are
+    reordered within their column, never assigned new row numbers.
+
+    Always runs (no flag needed). 20 iterations is fast even for 184-node flows.
     """
     col_nodes = defaultdict(list)
     for n in cols:
         col_nodes[cols[n]].append(n)
 
-    total_cols = max(cols.values(), default=0) + 1
+    col_order = sorted(col_nodes.keys())
 
     for iteration in range(iterations):
-        col_range = range(total_cols) if iteration % 2 == 0 else range(total_cols - 1, -1, -1)
+        # Alternate direction: even = forward (left-to-right), odd = backward
+        sweep = col_order if iteration % 2 == 0 else reversed(col_order)
 
-        for c in col_range:
+        for c in sweep:
             nodes_in_col = col_nodes[c]
             if len(nodes_in_col) <= 1:
                 continue
 
-            # Barycenter = mean row of all neighbors (predecessors + successors)
             barycenters = {}
             for n in nodes_in_col:
-                neighbor_rows = (
-                    [rows[p] for p, _ in in_edges.get(n, [])  if p in rows] +
-                    [rows[s] for s, _ in out_edges.get(n, []) if s in rows]
-                )
+                if iteration % 2 == 0:
+                    # Forward pass: pull toward predecessors (nodes to the left)
+                    neighbor_rows = [rows[p] for p, _ in in_edges.get(n, []) if p in rows]
+                else:
+                    # Backward pass: pull toward successors (nodes to the right)
+                    neighbor_rows = [rows[s] for s, _ in out_edges.get(n, []) if s in rows]
+
+                # Fall back to both sides if one is empty (isolated or end node)
+                if not neighbor_rows:
+                    neighbor_rows = (
+                        [rows[p] for p, _ in in_edges.get(n, [])  if p in rows] +
+                        [rows[s] for s, _ in out_edges.get(n, []) if s in rows]
+                    )
                 barycenters[n] = sum(neighbor_rows) / len(neighbor_rows) if neighbor_rows else rows[n]
 
-            # Sort by barycenter; use current row as tiebreaker for stability
             sorted_nodes = sorted(nodes_in_col, key=lambda n: (barycenters[n], rows[n]))
-
-            # Redistribute the same set of row values in the new order
-            sorted_rows = sorted(rows[n] for n in nodes_in_col)
+            sorted_rows  = sorted(rows[n] for n in nodes_in_col)
             for n, r in zip(sorted_nodes, sorted_rows):
                 rows[n] = r
+
+    return rows
+
+
+# ── Spring layout (Y-axis only, hierarchical spring) ─────────────────────────
+
+def spring_layout(cols, out_edges, in_edges, col_width, row_height,
+                  iterations=150, learning_rate=0.35):
+    """
+    Hierarchical spring layout: X is fixed to topological column (preserves
+    left-to-right flow direction), Y is found by spring relaxation.
+
+    Algorithm:
+      1. Initialize Y: stagger nodes within each column to break symmetry
+      2. Spring relaxation (iterations passes):
+           For each node n:
+             target_y = mean Y of all connected neighbors
+             y[n] += learning_rate * (target_y - y[n])
+           Decay learning_rate slightly each step to stabilize
+      3. Snap Y to nearest row_height grid
+      4. Resolve same-column collisions: sort by snapped row, assign
+         consecutive rows where needed
+
+    Pure attraction (no repulsion during simulation) keeps the maths stable.
+    Collision resolution at the end spreads same-column nodes apart.
+    Connected nodes cluster together; unconnected subtrees separate naturally.
+    """
+    col_nodes = defaultdict(list)
+    for n in cols:
+        col_nodes[cols[n]].append(n)
+
+    # Initialize: stagger within each column so connected nodes have somewhere to pull from
+    y_pos = {}
+    for c, nodes in col_nodes.items():
+        for i, n in enumerate(nodes):
+            y_pos[n] = float(i * row_height)
+
+    # Spring relaxation: pull each node toward mean Y of its neighbors
+    lr = learning_rate
+    for _ in range(iterations):
+        new_y = {}
+        for n in cols:
+            neighbors = (
+                [p for p, _ in in_edges.get(n, [])  if p in y_pos] +
+                [s for s, _ in out_edges.get(n, []) if s in y_pos]
+            )
+            if neighbors:
+                target = sum(y_pos[nb] for nb in neighbors) / len(neighbors)
+                new_y[n] = y_pos[n] + lr * (target - y_pos[n])
+            else:
+                new_y[n] = y_pos[n]
+        y_pos = new_y
+        lr *= 0.99   # Slow decay to prevent oscillation
+
+    # Snap Y to nearest row grid
+    snapped = {n: round(y / row_height) for n, y in y_pos.items()}
+
+    # Resolve same-column collisions: sort by final Y, assign consecutive rows if dupes
+    rows = {}
+    for c, nodes in col_nodes.items():
+        order = sorted(nodes, key=lambda n: (snapped[n], n))
+        assigned = []
+        for n in order:
+            r = snapped[n]
+            while r in assigned:
+                r += 1
+            assigned.append(r)
+            rows[n] = r
 
     return rows
 
@@ -374,7 +451,7 @@ def node_pixels(node_id, cols, rows, col_width, row_height,
 # ── Main layout routine ───────────────────────────────────────────────────────
 
 def layout(filepath, col_width, row_height, band_gap, max_cols_arg, bands_arg, no_wrap,
-           start_x, start_y, flat=False, sort_rows=False, preview=False):
+           start_x, start_y, flat=False, sort_rows=False, spring=False, preview=False):
     print(f"Parsing: {filepath}")
     tree, root, activities, edges = parse_lpd(filepath)
     node_ids = list(activities.keys())
@@ -392,56 +469,77 @@ def layout(filepath, col_width, row_height, band_gap, max_cols_arg, bands_arg, n
 
     out_edges, in_edges = build_graph(activities, edges)
     cols, topo_order, main_target = assign_columns(node_ids, out_edges, in_edges, activities)
-    rows                          = assign_rows(node_ids, out_edges, in_edges, activities, main_target, topo_order)
+    total_cols = max(cols.values(), default=0) + 1
 
-    # Flat mode: pull each side-branch's last node to the merge column
-    # so the return edge draws vertical (rectangular bracket shape)
-    if flat:
-        align_branch_returns(cols, rows, in_edges)
-        no_wrap = True   # flat always uses a single horizontal band
+    if spring:
+        # Spring mode: Y determined by spring simulation, no band wrapping
+        rows = spring_layout(cols, out_edges, in_edges, col_width, row_height)
+        max_row = max(rows.values(), default=0)
+        canvas_w = start_x + total_cols * col_width
+        canvas_h = start_y + (max_row + 1) * row_height
+        print(f"  Nodes: {len(node_ids)}  |  Columns: {total_cols}  |  Spring rows: {max_row+1}  |  1 band (no wrap)")
+        print(f"  Canvas: ~{canvas_w} x {canvas_h} px")
 
-    # Crossing reduction: reorder nodes within each column to minimize edge crossings
-    if sort_rows:
+        if preview:
+            print(f"\n  Preview (id -> col / row -> x, y):")
+            print(f"  {'ID':<35} {'COL':>4} {'ROW':>4}   {'X':>5} {'Y':>5}")
+            print(f"  {'-'*35} {'-'*4} {'-'*4}   {'-'*5} {'-'*5}")
+            for n in topo_order:
+                x = start_x + cols[n] * col_width
+                y = start_y + rows[n] * row_height
+                print(f"  {n:<35} {cols[n]:>4} {rows[n]:>4}   {x:>5} {y:>5}")
+            return True
+
+        for n, act in activities.items():
+            act.set('x', str(start_x + cols[n] * col_width))
+            act.set('y', str(start_y + rows[n] * row_height))
+
+    else:
+        # Standard hierarchical mode
+        rows = assign_rows(node_ids, out_edges, in_edges, activities, main_target, topo_order)
+
+        # Flat mode: pull each side-branch's last node to the merge column
+        if flat:
+            align_branch_returns(cols, rows, in_edges)
+            no_wrap = True   # flat always uses a single horizontal band
+
+        # Crossing reduction: always run (20 alternating passes)
         reduce_crossings(cols, rows, out_edges, in_edges)
 
-    total_cols  = max(cols.values(), default=0) + 1
-    target_cols = resolve_target_cols(max_cols_arg, bands_arg, no_wrap, total_cols)
+        target_cols = resolve_target_cols(max_cols_arg, bands_arg, no_wrap, total_cols)
+        col_to_band, band_start = assign_bands(cols, rows, out_edges, activities, target_cols)
+        band_offsets            = compute_band_offsets(cols, rows, col_to_band, row_height, band_gap)
 
-    col_to_band, band_start = assign_bands(cols, rows, out_edges, activities, target_cols)
-    band_offsets            = compute_band_offsets(cols, rows, col_to_band, row_height, band_gap)
+        max_row   = max(rows.values(), default=0)
+        num_bands = max(col_to_band.values(), default=0) + 1
+        max_col_in_band = max(
+            (cols[n] - band_start.get(col_to_band.get(cols[n], 0), 0) for n in cols),
+            default=0
+        )
+        canvas_w = start_x + (max_col_in_band + 1) * col_width
+        canvas_h = start_y + band_offsets.get(num_bands - 1, 0) + (max_row + 1) * row_height
 
-    # Canvas size report
-    max_row   = max(rows.values(), default=0)
-    num_bands = max(col_to_band.values(), default=0) + 1
-    max_col_in_band = max(
-        (cols[n] - band_start.get(col_to_band.get(cols[n], 0), 0) for n in cols),
-        default=0
-    )
-    canvas_w = start_x + (max_col_in_band + 1) * col_width
-    canvas_h = start_y + band_offsets.get(num_bands - 1, 0) + (max_row + 1) * row_height
+        band_desc = f"{num_bands} band{'s' if num_bands != 1 else ''} of ~{target_cols} cols"
+        print(f"  Nodes: {len(node_ids)}  |  Columns: {total_cols}  |  Parallel rows: {max_row+1}  |  {band_desc}")
+        print(f"  Canvas: ~{canvas_w} x {canvas_h} px")
 
-    band_desc = f"{num_bands} band{'s' if num_bands != 1 else ''} of ~{target_cols} cols"
-    print(f"  Nodes: {len(node_ids)}  |  Columns: {total_cols}  |  Parallel rows: {max_row+1}  |  {band_desc}")
-    print(f"  Canvas: ~{canvas_w} x {canvas_h} px")
+        if preview:
+            print(f"\n  Preview (id -> col / band / row -> x, y):")
+            print(f"  {'ID':<35} {'COL':>4} {'BND':>4} {'ROW':>4}   {'X':>5} {'Y':>5}")
+            print(f"  {'-'*35} {'-'*4} {'-'*4} {'-'*4}   {'-'*5} {'-'*5}")
+            for n in topo_order:
+                x, y = node_pixels(n, cols, rows, col_width, row_height,
+                                   col_to_band, band_start, band_offsets, start_x, start_y)
+                print(f"  {n:<35} {cols[n]:>4} {col_to_band.get(cols[n],0):>4} {rows[n]:>4}   {x:>5} {y:>5}")
+            return True
 
-    if preview:
-        print(f"\n  Preview (id -> col / band / row -> x, y):")
-        print(f"  {'ID':<35} {'COL':>4} {'BND':>4} {'ROW':>4}   {'X':>5} {'Y':>5}")
-        print(f"  {'-'*35} {'-'*4} {'-'*4} {'-'*4}   {'-'*5} {'-'*5}")
-        for n in topo_order:
+        for n, act in activities.items():
             x, y = node_pixels(n, cols, rows, col_width, row_height,
                                col_to_band, band_start, band_offsets, start_x, start_y)
-            print(f"  {n:<35} {cols[n]:>4} {col_to_band.get(cols[n],0):>4} {rows[n]:>4}   {x:>5} {y:>5}")
-        return True
+            act.set('x', str(x))
+            act.set('y', str(y))
 
-    # Apply coordinates
-    for n, act in activities.items():
-        x, y = node_pixels(n, cols, rows, col_width, row_height,
-                           col_to_band, band_start, band_offsets, start_x, start_y)
-        act.set('x', str(x))
-        act.set('y', str(y))
-
-    # Validate after layout (coordinates don't affect edge refs, but sanity-check)
+    # Validate after layout
     post_errors = validate(root, set(node_ids))
     if post_errors:
         print("ERROR: Validation failed after layout -- aborting write.")
@@ -499,10 +597,12 @@ Examples:
                       help='No wrapping -- lay out in one long horizontal row')
     wrap.add_argument('--flat',     action='store_true',
                       help='Single row; side branches drop below and return vertically (rectangular bracket shape)')
+    wrap.add_argument('--spring',   action='store_true',
+                      help='Spring layout: Y positions found by edge-attraction simulation; nodes cluster by connectivity. Best for complex processes with many branches.')
 
-    # Crossing reduction
+    # Crossing reduction (now always runs; flag kept for compatibility)
     parser.add_argument('--sort-rows', action='store_true',
-                        help='Reduce edge crossings using barycenter heuristic (reorders nodes within each column)')
+                        help='(kept for compatibility -- crossing reduction now always runs)')
 
     # Spacing
     parser.add_argument('--col-width',  type=int, default=COL_WIDTH,  metavar='N',
@@ -535,7 +635,7 @@ Examples:
                col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                start_x=args.start_x, start_y=args.start_y,
-               flat=args.flat, sort_rows=args.sort_rows, preview=True)
+               flat=args.flat, sort_rows=args.sort_rows, spring=args.spring, preview=True)
         sys.exit(0)
 
     # ── Layout + write ────────────────────────────────────────────────────────
@@ -546,7 +646,7 @@ Examples:
                     col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                     max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                     start_x=args.start_x, start_y=args.start_y,
-                    flat=args.flat, sort_rows=args.sort_rows, preview=False)
+                    flat=args.flat, sort_rows=args.sort_rows, spring=args.spring, preview=False)
 
     if result is False:
         print("Layout failed. Original file unchanged (backup exists at above path).")

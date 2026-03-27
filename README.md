@@ -65,14 +65,16 @@ python lpd_layout.py MyProcess.lpd --flat       # cleanest for branchy flows
 | `--no-wrap` | One long horizontal row, no wrapping |
 | `--bands N` | Force exactly N horizontal bands |
 | `--max-cols N` | Wrap after exactly N columns |
+| `--spring` | Spring layout: Y positions found by edge-attraction simulation. Connected nodes cluster together vertically. Best for complex processes with many branches where the standard grid becomes cluttered. No band wrapping — one wide canvas. |
 
 > `--flat` gives the cleanest result for most processes.
+> `--spring` is best for large, dense processes (50+ nodes, many branches) where you want natural clustering over a rigid grid.
 
 **Crossing reduction**
 
 | Flag | What it does |
 |------|-------------|
-| `--sort-rows` | Reorder nodes within columns using barycenter heuristic to reduce edge crossings. Off by default. Best for processes with 3+ parallel branch rows. |
+| `--sort-rows` | (kept for compatibility — crossing reduction now always runs automatically, 20 alternating Sugiyama passes) |
 
 **Spacing**
 
@@ -103,7 +105,7 @@ Tip:     To undo -> python lpd_layout.py "MyProcess.lpd" --restore
 | Row (Y) | Topological order (Kahn's) + pending pre-assignment for BRANCH nodes |
 | Main branch detection | BFS — exclusive reachable count per target |
 | Safe wrap columns | BFS — common descendants (merge point) |
-| Crossing reduction | Barycenter heuristic — opt-in via `--sort-rows` |
+| Crossing reduction | Directional barycenter, 20 alternating Sugiyama passes — always runs |
 
 Error handler nodes (nodes whose only incoming edges are ERROR type) are automatically placed on a dedicated row below the main flow so they never overlap with End or other row-0 nodes.
 
