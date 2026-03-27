@@ -277,6 +277,54 @@ def align_branch_returns(cols, rows, in_edges):
                 cols[pred] = merge_col  # same X as merge point → vertical return edge
 
 
+# ── Crossing reduction (barycenter heuristic) ────────────────────────────────
+
+def reduce_crossings(cols, rows, out_edges, in_edges, iterations=4):
+    """
+    Barycenter heuristic crossing reduction (Sugiyama framework, layer 3).
+
+    For each column, nodes are reordered by the mean row-position of their
+    neighbors (predecessors + successors). Alternates forward and backward
+    passes for stability. The same set of row values stays in use for each
+    column — nodes are just swapped, never moved to new rows.
+
+    Enable with --sort-rows. Noticeable improvement on processes with 3+
+    parallel branch rows where edges would otherwise cross each other.
+    """
+    col_nodes = defaultdict(list)
+    for n in cols:
+        col_nodes[cols[n]].append(n)
+
+    total_cols = max(cols.values(), default=0) + 1
+
+    for iteration in range(iterations):
+        col_range = range(total_cols) if iteration % 2 == 0 else range(total_cols - 1, -1, -1)
+
+        for c in col_range:
+            nodes_in_col = col_nodes[c]
+            if len(nodes_in_col) <= 1:
+                continue
+
+            # Barycenter = mean row of all neighbors (predecessors + successors)
+            barycenters = {}
+            for n in nodes_in_col:
+                neighbor_rows = (
+                    [rows[p] for p, _ in in_edges.get(n, [])  if p in rows] +
+                    [rows[s] for s, _ in out_edges.get(n, []) if s in rows]
+                )
+                barycenters[n] = sum(neighbor_rows) / len(neighbor_rows) if neighbor_rows else rows[n]
+
+            # Sort by barycenter; use current row as tiebreaker for stability
+            sorted_nodes = sorted(nodes_in_col, key=lambda n: (barycenters[n], rows[n]))
+
+            # Redistribute the same set of row values in the new order
+            sorted_rows = sorted(rows[n] for n in nodes_in_col)
+            for n, r in zip(sorted_nodes, sorted_rows):
+                rows[n] = r
+
+    return rows
+
+
 # ── Validation (edge reference integrity) ────────────────────────────────────
 
 def validate(root, activity_ids):
@@ -471,7 +519,7 @@ def node_pixels(node_id, cols, rows, col_width, row_height,
 # ── Main layout routine ───────────────────────────────────────────────────────
 
 def layout(filepath, col_width, row_height, band_gap, max_cols_arg, bands_arg, no_wrap,
-           start_x, start_y, flat=False, preview=False):
+           start_x, start_y, flat=False, sort_rows=False, preview=False):
     print(f"Parsing: {filepath}")
     tree, root, activities, edges = parse_lpd(filepath)
     node_ids = list(activities.keys())
@@ -496,6 +544,10 @@ def layout(filepath, col_width, row_height, band_gap, max_cols_arg, bands_arg, n
     if flat:
         align_branch_returns(cols, rows, in_edges)
         no_wrap = True   # flat always uses a single horizontal band
+
+    # Crossing reduction: reorder nodes within each column to minimize edge crossings
+    if sort_rows:
+        reduce_crossings(cols, rows, out_edges, in_edges)
 
     total_cols  = max(cols.values(), default=0) + 1
     target_cols = resolve_target_cols(max_cols_arg, bands_arg, no_wrap, total_cols)
@@ -568,6 +620,7 @@ Examples:
   python lpd_layout.py MyProcess.lpd --preview         # show result without writing
   python lpd_layout.py MyProcess.lpd --restore         # undo last layout
   python lpd_layout.py MyProcess.lpd --flat            # cleanest for branchy flows
+  python lpd_layout.py MyProcess.lpd --sort-rows       # reduce edge crossings (3+ branch rows)
   python lpd_layout.py MyProcess.lpd --bands 2         # force 2 horizontal bands
   python lpd_layout.py MyProcess.lpd --no-wrap         # single long row
   python lpd_layout.py MyProcess.lpd --col-width 200 --row-height 120
@@ -591,6 +644,10 @@ Examples:
                       help='No wrapping -- lay out in one long horizontal row')
     wrap.add_argument('--flat',     action='store_true',
                       help='Single row; side branches drop below and return vertically (rectangular bracket shape)')
+
+    # Crossing reduction
+    parser.add_argument('--sort-rows', action='store_true',
+                        help='Reduce edge crossings using barycenter heuristic (reorders nodes within each column)')
 
     # Spacing
     parser.add_argument('--col-width',  type=int, default=COL_WIDTH,  metavar='N',
@@ -623,7 +680,7 @@ Examples:
                col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                start_x=args.start_x, start_y=args.start_y,
-               flat=args.flat, preview=True)
+               flat=args.flat, sort_rows=args.sort_rows, preview=True)
         sys.exit(0)
 
     # ── Layout + write ────────────────────────────────────────────────────────
@@ -634,7 +691,7 @@ Examples:
                     col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                     max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                     start_x=args.start_x, start_y=args.start_y,
-                    flat=args.flat, preview=False)
+                    flat=args.flat, sort_rows=args.sort_rows, preview=False)
 
     if result is False:
         print("Layout failed. Original file unchanged (backup exists at above path).")

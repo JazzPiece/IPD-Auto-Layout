@@ -79,6 +79,16 @@ python lpd_layout.py MyProcess.lpd --flat
 
 ---
 
+### Crossing reduction flag _(optional, independent of layout style)_
+
+| Flag | What it does |
+|------|-------------|
+| `--sort-rows` | Reorders nodes within each column using the **barycenter heuristic** to minimize edge crossings. Most noticeable on processes with 3+ parallel branch rows. Off by default — safe to combine with any layout style. |
+
+> Combinable with any flag: `--flat --sort-rows`, `--bands 3 --sort-rows`, etc.
+
+---
+
 ### Spacing flags
 
 | Flag | Default | What it does |
@@ -112,11 +122,13 @@ python lpd_layout.py MyProcess.lpd --no-wrap              # single long row
 python lpd_layout.py MyProcess.lpd --bands 2              # 2 horizontal bands
 python lpd_layout.py MyProcess.lpd --max-cols 12          # wrap at 12 cols
 
+python lpd_layout.py MyProcess.lpd --sort-rows            # reduce edge crossings (3+ branch rows)
+
 python lpd_layout.py MyProcess.lpd --col-width 200        # wider columns
 python lpd_layout.py MyProcess.lpd --row-height 120       # taller rows
 python lpd_layout.py MyProcess.lpd --band-gap 120         # more space between bands
 
-python lpd_layout.py MyProcess.lpd --flat --col-width 180 --row-height 120
+python lpd_layout.py MyProcess.lpd --flat --sort-rows --col-width 180
 ```
 
 ---
@@ -145,6 +157,12 @@ To decide which outgoing path from a BRANCH node is the "main" branch (stays on 
 
 To prevent band wrapping from cutting mid-branch, the script runs a **BFS** from each pair of branch targets to find their common descendants (the merge point). Any column between the BRANCH node and its merge point is marked unsafe for wrapping — bands only break at clean gaps between branch sections.
 
+### Crossing reduction — Barycenter heuristic (`--sort-rows`)
+
+After row assignment, nodes within each column can be reordered to minimize edge crossings. The barycenter of a node is the mean row-position of all its neighbors (predecessors + successors). Nodes in each column are sorted by their barycenter value. The algorithm runs 4 alternating forward/backward passes for stability.
+
+This is **off by default** — it has no effect on single-row-per-column layouts and is only noticeable on processes with 3+ parallel branch rows. Enable with `--sort-rows`.
+
 ### Algorithm summary
 
 | Phase | Algorithm |
@@ -153,6 +171,7 @@ To prevent band wrapping from cutting mid-branch, the script runs a **BFS** from
 | Row (Y) | Topological order (Kahn's) + pending pre-assignment |
 | Main branch detection | BFS — exclusive reachable count per target |
 | Safe wrap columns | BFS — common descendants (merge point) |
+| Crossing reduction | Barycenter heuristic — opt-in via `--sort-rows` |
 
 ### Flat mode (`--flat`)
 
