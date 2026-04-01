@@ -573,7 +573,7 @@ Examples:
   python lpd_layout.py MyProcess.lpd --preview         # show result without writing
   python lpd_layout.py MyProcess.lpd --restore         # undo last layout
   python lpd_layout.py MyProcess.lpd --flat            # cleanest for branchy flows
-  python lpd_layout.py MyProcess.lpd --sort-rows       # reduce edge crossings (3+ branch rows)
+  python lpd_layout.py MyProcess.lpd --spring          # spring Y layout for dense/complex flows
   python lpd_layout.py MyProcess.lpd --bands 2         # force 2 horizontal bands
   python lpd_layout.py MyProcess.lpd --no-wrap         # single long row
   python lpd_layout.py MyProcess.lpd --col-width 200 --row-height 120

@@ -22,13 +22,12 @@ Requirements: Python 3.6+ (stdlib only). lpd_common.py must be in the same folde
 import argparse
 import glob
 import os
-import re
 import sys
 
 from lpd_common import (
     parse_lpd, build_graph, topological_sort,
     validate_refs, get_prop, iter_props,
-    ITERATOR_TYPES, BLOCKED_TYPES, EMAIL_ADDR_PROPS,
+    ITERATOR_TYPES, BLOCKED_TYPES, EMAIL_ADDR_PROPS, EMAIL_RE,
 )
 
 # -- Check definitions ---------------------------------------------------------
@@ -46,15 +45,11 @@ REQUIRED_PROPS = {
     'ITERFR': [('filePathName', 'file path')],
 }
 
-# Regex: a string that looks like an email address
-_EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
-
-
 def _is_hardcoded_email(value):
     """True if value contains a raw email address (not a _configuration token)."""
     if '<!_configuration' in value:
         return False
-    return bool(_EMAIL_RE.search(value))
+    return bool(EMAIL_RE.search(value))
 
 
 # -- Per-file validation -------------------------------------------------------

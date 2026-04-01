@@ -21,7 +21,7 @@ import argparse
 import os
 import sys
 
-from lpd_common import parse_lpd, write_lpd, make_backup
+from lpd_common import parse_lpd, write_lpd, make_backup, ITERATOR_TYPES
 
 
 def find_references(root, old_id):
@@ -119,7 +119,6 @@ Examples:
         sys.exit(0)
 
     # Warn if renaming an iterator whose ItEnd also needs renaming
-    from lpd_common import ITERATOR_TYPES
     old_act = activities[args.old_id]
     if old_act.get('activityType', '') in ITERATOR_TYPES:
         itend_id = f"End-{args.old_id}"

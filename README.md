@@ -288,8 +288,8 @@ Done.    MyProcess.lpd
 ## Tested on
 
 - Infor Landmark / IDP version `9.1.0` (Landmark 2026)
-- Multi-tenant hosted Infor (Onvida Health / YRMC)
-- 125 production HCM processes, 56 FSM processes
+- Multi-tenant hosted Infor
+- 181 production processes (HCM + FSM)
 - Processes from 16 nodes (simple) to 218 nodes (14 branches, 24 iterators)
 
 ---

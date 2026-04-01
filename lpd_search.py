@@ -24,12 +24,9 @@ Requirements: Python 3.6+ (stdlib only). lpd_common.py must be in the same folde
 import argparse
 import glob
 import os
-import re
 import sys
 
-from lpd_common import parse_lpd, get_prop, all_cdata_text, EMAIL_ADDR_PROPS
-
-_EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+from lpd_common import parse_lpd, get_prop, all_cdata_text, EMAIL_ADDR_PROPS, EMAIL_RE
 
 
 # ── Search functions — each returns list of match description strings ─────────
@@ -74,7 +71,7 @@ def search_hardcoded_email(activities):
             continue
         for prop_name in EMAIL_ADDR_PROPS:
             value = get_prop(act, prop_name)
-            if value and '<!_configuration' not in value and _EMAIL_RE.search(value):
+            if value and '<!_configuration' not in value and EMAIL_RE.search(value):
                 matches.append(
                     f"{nid} (EMAIL): '{prop_name}' has hardcoded address: '{value}'"
                 )
