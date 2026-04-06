@@ -451,7 +451,7 @@ def node_pixels(node_id, cols, rows, col_width, row_height,
 # ── Main layout routine ───────────────────────────────────────────────────────
 
 def layout(filepath, col_width, row_height, band_gap, max_cols_arg, bands_arg, no_wrap,
-           start_x, start_y, flat=False, sort_rows=False, spring=False, preview=False):
+           start_x, start_y, flat=False, spring=False, preview=False):
     print(f"Parsing: {filepath}")
     tree, root, activities, edges = parse_lpd(filepath)
     node_ids = list(activities.keys())
@@ -600,10 +600,6 @@ Examples:
     wrap.add_argument('--spring',   action='store_true',
                       help='Spring layout: Y positions found by edge-attraction simulation; nodes cluster by connectivity. Best for complex processes with many branches.')
 
-    # Crossing reduction (now always runs; flag kept for compatibility)
-    parser.add_argument('--sort-rows', action='store_true',
-                        help='(kept for compatibility -- crossing reduction now always runs)')
-
     # Spacing
     parser.add_argument('--col-width',  type=int, default=COL_WIDTH,  metavar='N',
                         help=f'Horizontal spacing between columns in px (default: {COL_WIDTH})')
@@ -635,7 +631,7 @@ Examples:
                col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                start_x=args.start_x, start_y=args.start_y,
-               flat=args.flat, sort_rows=args.sort_rows, spring=args.spring, preview=True)
+               flat=args.flat, spring=args.spring, preview=True)
         sys.exit(0)
 
     # ── Layout + write ────────────────────────────────────────────────────────
@@ -646,7 +642,7 @@ Examples:
                     col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
                     max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
                     start_x=args.start_x, start_y=args.start_y,
-                    flat=args.flat, sort_rows=args.sort_rows, spring=args.spring, preview=False)
+                    flat=args.flat, spring=args.spring, preview=False)
 
     if result is False:
         print("Layout failed. Original file unchanged (backup exists at above path).")

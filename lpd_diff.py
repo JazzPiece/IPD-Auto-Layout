@@ -25,12 +25,37 @@ from lpd_common import parse_lpd, iter_props
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def activity_on_error_summary(act):
+    """
+    Return a compact string summarising OnActivityError settings.
+    Included as a synthetic prop so error-handler changes surface in diffs.
+    """
+    oae = act.find('OnActivityError')
+    if oae is None:
+        return ''
+    goto_el   = oae.find('goto')
+    act_el    = oae.find('activity')
+    log_el    = oae.find('log')
+    goto      = (goto_el.text  or 'false') if goto_el  is not None else 'false'
+    target    = (act_el.text   or '')      if act_el   is not None else ''
+    log       = (log_el.text   or 'false') if log_el   is not None else 'false'
+    parts = [f'goto={goto}']
+    if goto == 'true' and target:
+        parts.append(f'activity={target}')
+    parts.append(f'log={log}')
+    return ','.join(parts)
+
+
 def activity_props(act):
     """Return dict of {prop_name: value} for an activity (excludes x, y, id, caption)."""
     props = {}
     for name, value in iter_props(act):
         if name not in ('_activityCheckPoint',):
             props[name] = value
+    # Synthetic prop so OnActivityError changes surface in the diff
+    oae = activity_on_error_summary(act)
+    if oae:
+        props['<OnActivityError>'] = oae
     return props
 
 
@@ -122,10 +147,10 @@ def diff_files(orig_path, new_path, skip_coords=False):
     orig_edge_keys = {edge_key(e): e for e in orig_edges}
     new_edge_keys  = {edge_key(e): e for e in new_edges}
 
-    for k in sorted(new_edge_keys - orig_edge_keys.keys()):
+    for k in sorted(new_edge_keys.keys() - orig_edge_keys.keys()):
         result['edges_added'].append(f"+ {edge_label(new_edge_keys[k])}")
 
-    for k in sorted(orig_edge_keys.keys() - new_edge_keys):
+    for k in sorted(orig_edge_keys.keys() - new_edge_keys.keys()):
         result['edges_removed'].append(f"- {edge_label(orig_edge_keys[k])}")
 
     return result

@@ -74,8 +74,6 @@ python lpd_layout.py MyProcess.lpd --flat       # cleanest for branchy flows
 
 | Flag | What it does |
 |------|-------------|
-| `--sort-rows` | (kept for compatibility — crossing reduction now always runs automatically, 20 alternating Sugiyama passes) |
-
 **Spacing**
 
 | Flag | Default | What it does |

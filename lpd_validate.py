@@ -148,6 +148,16 @@ def validate_file(filepath):
                     f"{nid} ({atype}): missing paired ItEnd node "
                     f"(expected id='{expected_end_id}')"
                 )
+            elif atype == 'FORMTXN':
+                # FORMTXN requires FgaFormTxnIterEnd, not the generic FgaIterEnd
+                itend_act = activities[expected_end_id]
+                cn = itend_act.get('className', '')
+                if cn and not cn.endswith('FgaFormTxnIterEnd'):
+                    errors.append(
+                        f"{expected_end_id} (ItEnd): FORMTXN requires "
+                        f"className FgaFormTxnIterEnd "
+                        f"(got '{cn.rsplit('.', 1)[-1]}')"
+                    )
 
     # -- 7. BRANCH edges correctness -------------------------------------------
     # HRUA and UA (UserAction) nodes legitimately use BRANCH edges for
