@@ -232,6 +232,7 @@ def reduce_crossings(cols, rows, out_edges, in_edges, iterations=20):
     for iteration in range(iterations):
         # Alternate direction: even = forward (left-to-right), odd = backward
         sweep = col_order if iteration % 2 == 0 else reversed(col_order)
+        changed = False
 
         for c in sweep:
             nodes_in_col = col_nodes[c]
@@ -258,7 +259,12 @@ def reduce_crossings(cols, rows, out_edges, in_edges, iterations=20):
             sorted_nodes = sorted(nodes_in_col, key=lambda n: (barycenters[n], rows[n]))
             sorted_rows  = sorted(rows[n] for n in nodes_in_col)
             for n, r in zip(sorted_nodes, sorted_rows):
+                if rows[n] != r:
+                    changed = True
                 rows[n] = r
+
+        if not changed:
+            break
 
     return rows
 

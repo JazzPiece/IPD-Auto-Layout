@@ -32,11 +32,6 @@ from lpd_common import (
 
 # -- Check definitions ---------------------------------------------------------
 
-ITEND_CLASS = {
-    'FORMTXN': 'FgaFormTxnIterEnd',
-}
-DEFAULT_ITEND_CLASS = 'FgaIterEnd'
-
 # Required props that must be non-empty per node type
 REQUIRED_PROPS = {
     'EMAIL':  [('to', 'recipient address'), ('content', 'message body')],
