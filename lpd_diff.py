@@ -166,35 +166,34 @@ def print_section(title, lines):
         print(f"  {line}")
 
 
+def _summary_parts(result):
+    """Build the human-readable change-count list shared by brief and full output."""
+    na = len(result['nodes_added'])
+    nr = len(result['nodes_removed'])
+    nc = len([l for l in result['nodes_changed'] if l.startswith('~')])
+    ea = len(result['edges_added'])
+    er = len(result['edges_removed'])
+    parts = []
+    if na: parts.append(f"{na} node(s) added")
+    if nr: parts.append(f"{nr} node(s) removed")
+    if nc: parts.append(f"{nc} node(s) changed")
+    if ea: parts.append(f"{ea} edge(s) added")
+    if er: parts.append(f"{er} edge(s) removed")
+    return parts
+
+
 def print_diff(orig_path, new_path, result, brief=False):
     orig_label = os.path.basename(orig_path)
     new_label  = os.path.basename(new_path)
     print(f"Diff: {orig_label}  ->  {new_label}")
 
-    total_changes = (
-        len(result['nodes_added']) +
-        len(result['nodes_removed']) +
-        len([l for l in result['nodes_changed'] if l.startswith('~')]) +
-        len(result['edges_added']) +
-        len(result['edges_removed'])
-    )
+    parts = _summary_parts(result)
 
-    if total_changes == 0:
+    if not parts:
         print("\n  No differences found.")
         return
 
     if brief:
-        parts = []
-        na = len(result['nodes_added'])
-        nr = len(result['nodes_removed'])
-        nc = len([l for l in result['nodes_changed'] if l.startswith('~')])
-        ea = len(result['edges_added'])
-        er = len(result['edges_removed'])
-        if na: parts.append(f"{na} node(s) added")
-        if nr: parts.append(f"{nr} node(s) removed")
-        if nc: parts.append(f"{nc} node(s) changed")
-        if ea: parts.append(f"{ea} edge(s) added")
-        if er: parts.append(f"{er} edge(s) removed")
         print("  " + ",  ".join(parts))
         return
 
@@ -210,18 +209,6 @@ def print_diff(orig_path, new_path, result, brief=False):
     print_section("ADDED edges", result['edges_added'])
     print_section("REMOVED edges", result['edges_removed'])
 
-    # Summary line
-    parts = []
-    na = len(result['nodes_added'])
-    nr = len(result['nodes_removed'])
-    nc = len([l for l in result['nodes_changed'] if l.startswith('~')])
-    ea = len(result['edges_added'])
-    er = len(result['edges_removed'])
-    if na: parts.append(f"{na} node(s) added")
-    if nr: parts.append(f"{nr} node(s) removed")
-    if nc: parts.append(f"{nc} node(s) changed")
-    if ea: parts.append(f"{ea} edge(s) added")
-    if er: parts.append(f"{er} edge(s) removed")
     print(f"\n{',  '.join(parts)}.")
 
 

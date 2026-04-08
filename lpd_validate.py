@@ -25,8 +25,8 @@ import os
 import sys
 
 from lpd_common import (
-    parse_lpd, build_graph, topological_sort,
-    validate_refs, get_prop, iter_props,
+    parse_lpd, build_graph,
+    validate_refs, get_prop,
     ITERATOR_TYPES, BLOCKED_TYPES, EMAIL_ADDR_PROPS, EMAIL_RE,
 )
 
@@ -52,7 +52,7 @@ def _is_hardcoded_email(value):
 def validate_file(filepath):
     """
     Run all checks on one .lpd file.
-    Returns (errors, warnings)  -  each a list of strings.
+    Returns (errors, warnings, node_count)  -  errors/warnings are lists of strings.
     """
     errors   = []
     warnings = []
@@ -60,11 +60,10 @@ def validate_file(filepath):
     try:
         tree, root, activities, edges = parse_lpd(filepath)
     except Exception as e:
-        return [f"Could not parse file: {e}"], []
+        return [f"Could not parse file: {e}"], [], 0
 
     activity_ids = set(activities.keys())
     out_edges, in_edges = build_graph(activities, edges)
-    topo = topological_sort(list(activity_ids), out_edges, in_edges)
 
     # -- 1. Duplicate activity IDs ---------------------------------------------
     raw_ids = [a.get('id') for a in root.findall('.//activity') if a.get('id')]
@@ -94,12 +93,6 @@ def validate_file(filepath):
 
     # -- 4. Error-path END missing processStatus=ERROR -------------------------
     # Find END nodes reachable only via ERROR edges from main flow
-    error_only_nodes = set()
-    for nid, act in activities.items():
-        preds = in_edges.get(nid, [])
-        if preds and all(t == 'ERROR' for _, t in preds):
-            error_only_nodes.add(nid)
-
     def _all_predecessors_error_only(nid, visited=None):
         if visited is None:
             visited = set()
@@ -201,20 +194,13 @@ def validate_file(filepath):
                             f"({label}) is empty  -  configure in IDP"
                         )
 
-    return errors, warnings
+    return errors, warnings, len(activities)
 
 
 # -- Output formatting ---------------------------------------------------------
 
-def report(filepath, errors, warnings, show_ok=True):
+def report(filepath, errors, warnings, node_count=0, show_ok=True):
     """Print validation results for one file. Returns True if any issues found."""
-    node_count = 0
-    try:
-        _, root, _, _ = parse_lpd(filepath)
-        node_count = len(root.findall('.//activity'))
-    except Exception:
-        pass
-
     label = os.path.basename(filepath)
     has_issues = bool(errors or warnings)
 
@@ -285,11 +271,11 @@ Examples:
             total_errors += 1
             continue
 
-        errors, warnings = validate_file(filepath)
+        errors, warnings, node_count = validate_file(filepath)
         total_errors   += len(errors)
         total_warnings += len(warnings)
 
-        had_issues = report(filepath, errors, warnings, show_ok=True)
+        had_issues = report(filepath, errors, warnings, node_count=node_count, show_ok=True)
         if had_issues:
             files_with_issues += 1
 
