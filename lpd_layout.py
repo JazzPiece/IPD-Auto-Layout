@@ -9,6 +9,9 @@ Usage:
   python lpd_layout.py <file.lpd>                      # layout + auto-backup
   python lpd_layout.py <file.lpd> --preview            # show new coords, don't write
   python lpd_layout.py <file.lpd> --restore            # restore most recent backup
+  python lpd_layout.py --dir ./production/             # layout all .lpd in a folder
+  python lpd_layout.py --dir ./production/ --preview   # preview all, nothing written
+  python lpd_layout.py --dir ./production/ --restore   # restore all backups in a folder
   python lpd_layout.py <file.lpd> --col-width 220      # custom column width
   python lpd_layout.py <file.lpd> --row-height 150     # custom row height
 
@@ -16,6 +19,7 @@ Requirements: Python 3.6+ (stdlib only, no pip installs needed)
 """
 
 import argparse
+import glob as glob_module
 import math
 import os
 import sys
@@ -583,9 +587,14 @@ Examples:
   python lpd_layout.py MyProcess.lpd --bands 2         # force 2 horizontal bands
   python lpd_layout.py MyProcess.lpd --no-wrap         # single long row
   python lpd_layout.py MyProcess.lpd --col-width 200 --row-height 120
+  python lpd_layout.py --dir ./production/             # layout all .lpd in a folder
+  python lpd_layout.py --dir ./production/ --preview   # preview all, nothing written
+  python lpd_layout.py --dir ./production/ --restore   # restore all backups in a folder
         """
     )
-    parser.add_argument('file', help='.lpd or .idp file to layout')
+    parser.add_argument('file', nargs='?', help='.lpd or .idp file to layout')
+    parser.add_argument('--dir', metavar='DIR',
+                        help='Layout all .lpd files in DIR (batch mode)')
 
     # Modes
     parser.add_argument('--preview', action='store_true',
@@ -622,43 +631,75 @@ Examples:
 
     args = parser.parse_args()
 
-    filepath = args.file
-    if not os.path.isfile(filepath):
-        print(f"File not found: {filepath}")
-        sys.exit(1)
+    # ── Collect target files ──────────────────────────────────────────────────
+    if args.dir:
+        if not os.path.isdir(args.dir):
+            print(f"Directory not found: {args.dir}")
+            sys.exit(1)
+        targets = sorted(glob_module.glob(os.path.join(args.dir, '*.lpd')))
+        if not targets:
+            print(f"No .lpd files found in: {args.dir}")
+            sys.exit(0)
+    else:
+        if not args.file:
+            parser.error("Provide a file argument or use --dir")
+        if not os.path.isfile(args.file):
+            print(f"File not found: {args.file}")
+            sys.exit(1)
+        targets = [args.file]
+
+    layout_kwargs = dict(
+        col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
+        max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
+        start_x=args.start_x, start_y=args.start_y,
+        flat=args.flat, spring=args.spring,
+    )
 
     # ── Restore mode ──────────────────────────────────────────────────────────
     if args.restore:
-        sys.exit(0 if restore_backup(filepath) else 1)
+        ok = all(restore_backup(fp) for fp in targets)
+        sys.exit(0 if ok else 1)
 
     # ── Preview mode ──────────────────────────────────────────────────────────
     if args.preview:
-        layout(filepath,
-               col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
-               max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
-               start_x=args.start_x, start_y=args.start_y,
-               flat=args.flat, spring=args.spring, preview=True)
+        for fp in targets:
+            layout(fp, **layout_kwargs, preview=True)
+            if len(targets) > 1:
+                print()
         sys.exit(0)
 
-    # ── Layout + write ────────────────────────────────────────────────────────
-    backup_path = make_backup(filepath)
-    print(f"Backup:  {backup_path}")
+    # ── Layout + write (single or batch) ─────────────────────────────────────
+    succeeded, failed = [], []
+    for fp in targets:
+        backup_path = make_backup(fp)
+        print(f"Backup:  {backup_path}")
 
-    result = layout(filepath,
-                    col_width=args.col_width, row_height=args.row_height, band_gap=args.band_gap,
-                    max_cols_arg=args.max_cols, bands_arg=args.bands, no_wrap=args.no_wrap,
-                    start_x=args.start_x, start_y=args.start_y,
-                    flat=args.flat, spring=args.spring, preview=False)
+        result = layout(fp, **layout_kwargs, preview=False)
 
-    if result is False:
+        if result is False:
+            print(f"Layout failed. Original file unchanged.")
+            failed.append(fp)
+        elif result is True:
+            succeeded.append(fp)
+        else:
+            write_lpd(result, fp)
+            print(f"Done.    {fp}")
+            succeeded.append(fp)
+
+        if len(targets) > 1:
+            print()
+
+    if len(targets) > 1:
+        print(f"Batch complete: {len(succeeded)} succeeded, {len(failed)} failed.")
+        if failed:
+            for fp in failed:
+                print(f"  FAILED: {fp}")
+        sys.exit(0 if not failed else 1)
+    elif failed:
         print("Layout failed. Original file unchanged (backup exists at above path).")
         sys.exit(1)
-    if result is True:
-        sys.exit(0)
-
-    write_lpd(result, filepath)
-    print(f"Done.    {filepath}")
-    print(f"Tip:     To undo -> python lpd_layout.py \"{filepath}\" --restore")
+    else:
+        print(f"Tip:     To undo -> python lpd_layout.py \"{targets[0]}\" --restore")
 
 
 if __name__ == '__main__':

@@ -44,6 +44,9 @@ python lpd_layout.py MyProcess.lpd              # layout + auto backup
 python lpd_layout.py MyProcess.lpd --preview    # preview only, nothing written
 python lpd_layout.py MyProcess.lpd --restore    # undo last layout
 python lpd_layout.py MyProcess.lpd --flat       # cleanest for branchy flows
+python lpd_layout.py --dir ./production/        # layout every .lpd in a folder
+python lpd_layout.py --dir ./production/ --preview   # preview all, nothing written
+python lpd_layout.py --dir ./production/ --restore   # restore all backups in a folder
 ```
 
 ### All flags
@@ -55,6 +58,7 @@ python lpd_layout.py MyProcess.lpd --flat       # cleanest for branchy flows
 | _(none)_ | Layout and write (backup created first) |
 | `--preview` | Print new coordinates, don't write |
 | `--restore` | Restore most recent backup for this file |
+| `--dir DIR` | Batch mode — layout every `.lpd` in `DIR` |
 
 **Layout style** _(mutually exclusive)_
 
